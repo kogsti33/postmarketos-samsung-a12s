@@ -26,23 +26,22 @@ jobs:
             libelf-dev \
             python3 \
             device-tree-compiler \
-            cpio \
-            wget
+            cpio
 
       - name: Clone mainline mt6763 kernel
         run: |
-          git clone https://gitlab.com/mtk-mainline/mt6763/linux.git kernel-tree
+          git clone --depth=1 https://gitlab.com/mtk-mainline/mt6763/linux.git kernel-tree
           cd kernel-tree
+          git fetch --depth=1 origin 9ea268cebfcd3e12fe677c83119ee24961624421
           git checkout 9ea268cebfcd3e12fe677c83119ee24961624421
 
-      - name: Apply Samsung Galaxy A12s DTS
+      - name: Apply Samsung Galaxy A12s DTS and fix Makefile
         run: |
           cp kernel/dts/samsung-a12s.dts kernel-tree/arch/arm64/boot/dts/exynos/
-          # Add samsung-a12s.dtb to the Makefile
-          cd kernel-tree
-          if ! grep -q "samsung-a12s.dtb" arch/arm64/boot/dts/exynos/Makefile; then
-            sed -i '/exynos850-e850-96.dtb/a\\tsamsung-a12s.dtb' arch/arm64/boot/dts/exynos/Makefile
-          fi
+          printf '# SPDX-License-Identifier: GPL-2.0\ndtb-$(CONFIG_ARCH_EXYNOS) += \\\n\texynos5433-tm2.dtb\t\t\\\n\texynos5433-tm2e.dtb\t\t\\\n\texynos7-espresso.dtb\t\t\\\n\texynos7885-jackpotlte.dtb\t\\\n\texynos850-e850-96.dtb\t\t\\\n\tsamsung-a12s.dtb\t\t\\\n\texynosautov9-sadk.dtb\n' > kernel-tree/arch/arm64/boot/dts/exynos/Makefile
+
+      - name: Verify Makefile
+        run: cat kernel-tree/arch/arm64/boot/dts/exynos/Makefile
 
       - name: Apply defconfig and build
         run: |
