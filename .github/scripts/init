@@ -1,0 +1,31 @@
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+
+echo ""
+echo "============================================"
+echo "  postmarketOS for Samsung Galaxy A12s"
+echo "  (SM-A127F, Exynos 850)"
+echo "============================================"
+echo ""
+uname -a
+echo ""
+echo "Block devices:"
+ls -la /dev/mmcblk* 2>/dev/null || echo "  (none found)"
+echo ""
+
+if [ -b /dev/mmcblk0p2 ]; then
+    echo "Found eMMC partition, attempting mount..."
+    mkdir -p /mnt/rootfs
+    if mount -t ext4 /dev/mmcblk0p2 /mnt/rootfs 2>/dev/null; then
+        echo "Rootfs mounted! Executing init..."
+        exec chroot /mnt/rootfs /sbin/init 2>/dev/null || true
+    fi
+fi
+
+echo ""
+echo "Dropping to shell."
+exec /bin/sh
