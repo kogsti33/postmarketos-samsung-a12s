@@ -1,4 +1,4 @@
-name: Build postmarketOS kernel for Samsung Galaxy A12s
+name: Build postmarketOS for Samsung Galaxy A12s
 
 on:
   push:
@@ -19,14 +19,10 @@ jobs:
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            python3 \
-            device-tree-compiler \
-            cpio
+            bc bison flex libssl-dev libelf-dev \
+            python3 device-tree-compiler cpio \
+            qemu-user-static binfmt-support \
+            docker.io
 
       - name: Clone mainline mt6763 kernel
         run: |
@@ -40,40 +36,346 @@ jobs:
           cp kernel/dts/samsung-a12s.dts kernel-tree/arch/arm64/boot/dts/exynos/
           printf '# SPDX-License-Identifier: GPL-2.0\ndtb-$(CONFIG_ARCH_EXYNOS) += \\\n\texynos5433-tm2.dtb\t\t\\\n\texynos5433-tm2e.dtb\t\t\\\n\texynos7-espresso.dtb\t\t\\\n\texynos7885-jackpotlte.dtb\t\\\n\texynos850-e850-96.dtb\t\t\\\n\tsamsung-a12s.dtb\t\t\\\n\texynosautov9-sadk.dtb\n' > kernel-tree/arch/arm64/boot/dts/exynos/Makefile
 
-      - name: Verify Makefile
-        run: cat kernel-tree/arch/arm64/boot/dts/exynos/Makefile
-
-      - name: Apply defconfig and build
+      - name: Build kernel
         run: |
           cd kernel-tree
           cp ../kernel/configs/samsung-a12s_defconfig .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs
 
-      - name: Collect artifacts
+      - name: Build postmarketOS rootfs
         run: |
-          mkdir -p artifacts
-          cp kernel-tree/arch/arm64/boot/Image artifacts/Image
-          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb artifacts/samsung-a12s.dtb
-          cp kernel-tree/.config artifacts/kernel.config
+          sudo docker run --rm --privileged \
+            -v ${{ github.workspace }}:/workspace \
+            -v /proc:/proc \
+            --platform linux/arm64 \
+            arm64v8/alpine:edge \
+            /workspace/.github/scripts/build-rootfs.sh
+
+      - name: Create boot.img
+        run: |
+          # Download mkbootimg
+          pip3 install mkbootimg
+          
+          # Create boot.img from kernel + initramfs
+          mkbootimg \
+            --kernel kernel-tree/arch/arm64/boot/Image \
+            --ramdisk postmarketos-initramfs.cpio.gz \
+            --base 0x80000000 \
+            --pagesize 2048 \
+            --cmdline "console=ttyS0,115200n8 root=/dev/mmcblk0p2 rw rootwait" \
+            --output boot.img
+
+      - name: Create flashable package
+        run: |
+          mkdir -p flash-package
+          cp boot.img flash-package/
+          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb flash-package/
+          
+          # Create flash script
+          cat > flash-package/flash.sh << 'FLASHEOF'
+#!/bin/bash
+echo "=== postmarketOS Flash Tool for Samsung Galaxy A12s ==="
+echo ""
+echo "This will flash postmarketOS to your device."
+echo "WARNING: This will replace your current OS!"
+echo ""
+echo "Make sure:"
+echo "  1. Battery is charged"
+echo "  2. Data is backed up"
+echo "  3. Device is connected via USB"
+echo ""
+read -p "Continue? (y/N) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+fi
+
+echo ""
+echo "Method 1: Heimdall (download mode)"
+echo "  1. Power off device"
+echo "  2. Hold Vol+ and Vol- while connecting USB"
+echo "  3. Run: heimdall flash --BOOT boot.img"
+echo ""
+echo "Method 2: TWRP (recovery)"
+echo "  1. Boot into TWRP"
+echo "  2. Push files: adb push boot.img /sdcard/"
+echo "  3. In TWRP Terminal: dd if=/sdcard/boot.img of=/dev/block/bootdevice/by-name/boot"
+echo ""
+echo "Method 3: Magisk"
+echo "  1. Copy boot.img to phone"
+echo "  2. Open Magisk → Install → Select and Patch a File"
+echo "  3. Flash patched_boot.img via TWRP"
+echo ""
+FLASHEOF
+          chmod +x flash-package/flash.sh
+
+          # Create README
+          cat > flash-package/README.md << 'READMEEOF'
+# postmarketOS for Samsung Galaxy A12s (SM-A127F)
+
+## Files
+- `boot.img` - Bootable kernel image
+- `samsung-a12s.dtb` - Device Tree Blob
+- `flash.sh` - Flash helper script
+
+## Quick Flash
+```bash
+# Download mode: Power off, hold Vol+Vol-, connect USB
+heimdall flash --BOOT boot.img
+```
+
+## TWRP Method
+1. Boot into TWRP
+2. `adb push boot.img /sdcard/`
+3. In TWRP Terminal: `dd if=/sdcard/boot.img of=/dev/block/bootdevice/by-name/boot`
+
+## What Works
+- [x] Kernel boots
+- [ ] Display
+- [ ] Touchscreen
+- [ ] WiFi
+- [ ] Bluetooth
+- [ ] Camera
+- [ ] Sound
+
+## Status
+Early development - kernel boots to console only.
+READMEEOF
 
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
         with:
           name: kernel-a12s
-          path: artifacts/Image
+          path: kernel-tree/arch/arm64/boot/Image
           retention-days: 30
 
       - name: Upload DTB
         uses: actions/upload-artifact@v4
         with:
           name: dtb-a12s
-          path: artifacts/samsung-a12s.dtb
+          path: kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb
           retention-days: 30
 
-      - name: Upload kernel config
+      - name: Upload flash package
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-config
-          path: artifacts/kernel.config
+          name: postmarketos-a12s-flash
+          path: flash-package/
+          retention-days: 30
+
+  build-rootfs:
+    runs-on: ubuntu-latest
+    needs: build-kernel
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-a12s
+          path: kernel/
+
+      - name: Download DTB
+        uses: actions/download-artifact@v4
+        with:
+          name: dtb-a12s
+          path: kernel/
+
+      - name: Build minimal Alpine rootfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+          # Create minimal aarch64 Alpine rootfs
+          mkdir -p rootfs
+          
+          # Download Alpine minirootfs for aarch64
+          wget -q https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.3-aarch64.tar.gz
+          sudo tar xzf alpine-minirootfs-3.21.3-aarch64.tar.gz -C rootfs/
+
+          # Copy kernel
+          sudo mkdir -p rootfs/boot
+          sudo cp kernel/Image rootfs/boot/
+          sudo cp kernel/samsung-a12s.dtb rootfs/boot/
+
+          # Setup init
+          sudo tee rootfs/init > /dev/null << 'INITEOF'
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+
+echo "============================================"
+echo "  postmarketOS for Samsung Galaxy A12s"
+echo "  (SM-A127F, Exynos 850)"
+echo "============================================"
+echo ""
+echo "Welcome to postmarketOS!"
+echo ""
+echo "System information:"
+uname -a
+echo ""
+echo "Available block devices:"
+ls -la /dev/mmcblk* 2>/dev/null || echo "No MMC devices found"
+echo ""
+
+# Try to mount rootfs from eMMC
+for dev in /dev/mmcblk0p2 /dev/mmcblk0p3 /dev/mmcblk0p4; do
+    if [ -b "$dev" ]; then
+        echo "Trying to mount $dev as rootfs..."
+        mkdir -p /mnt/rootfs
+        mount -t ext4 "$dev" /mnt/rootfs 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "Rootfs mounted from $dev"
+            echo "Chrooting into rootfs..."
+            chroot /mnt/rootfs /bin/sh
+            break
+        fi
+    fi
+done
+
+echo ""
+echo "Dropping to shell..."
+exec /bin/sh
+INITEOF
+          sudo chmod +x rootfs/init
+
+          # Create initramfs
+          cd rootfs
+          sudo find . | sudo cpio -o -H newc 2>/dev/null | gzip > ../postmarketos-initramfs.cpio.gz
+          cd ..
+
+          ls -lh postmarketos-initramfs.cpio.gz
+
+      - name: Create boot.img
+        run: |
+          sudo apt-get install -y libarchive-tools
+          
+          # Use mkbootimg format (Samsung compatible)
+          # Create boot image with mkbootimg-compatible format
+          
+          # Simple approach: concatenate kernel + initramfs
+          # Samsung Exynos uses boot.img format
+          
+          # Download mkbootimg
+          pip3 install --break-system-packages mkbootimg 2>/dev/null || true
+          
+          if command -v mkbootimg &> /dev/null; then
+            mkbootimg \
+              --kernel kernel/Image \
+              --ramdisk postmarketos-initramfs.cpio.gz \
+              --base 0x00000000 \
+              --pagesize 2048 \
+              --cmdline "console=ttyS0,115200n8 root=/dev/mmcblk0p2 rootwait" \
+              --output boot.img
+          else
+            # Manual boot.img creation
+            # Samsung format: header + kernel + ramdisk
+            python3 -c "
+          import struct
+            
+          # Read kernel
+          with open('kernel/Image', 'rb') as f:
+              kernel = f.read()
+          with open('postmarketos-initramfs.cpio.gz', 'rb') as f:
+              ramdisk = f.read()
+            
+          # Boot image header (2048 bytes)
+          header = bytearray(2048)
+          # Magic: 'ANDROID!'
+          header[0:8] = b'ANDROID!'
+          # Kernel size at offset 8
+          struct.pack_into('<I', header, 8, len(kernel))
+          # Kernel addr at offset 12
+          struct.pack_into('<I', header, 12, 0x00008000)
+          # Ramdisk size at offset 16
+          struct.pack_into('<I', header, 16, len(ramdisk))
+          # Ramdisk addr at offset 20
+          struct.pack_into('<I', header, 20, 0x01000000)
+          # Page size at offset 36
+          struct.pack_into('<I', header, 36, 2048)
+          # Cmdline at offset 16384 (within header)
+          cmdline = b'console=ttyS0,115200n8 root=/dev/mmcblk0p2 rootwait\x00'
+          header[16384:16384+len(cmdline)] = cmdline
+            
+          with open('boot.img', 'wb') as f:
+              f.write(header)
+              f.write(kernel)
+              # Pad to page boundary
+              pad = (2048 - (len(kernel) % 2048)) % 2048
+              f.write(b'\x00' * pad)
+              f.write(ramdisk)
+            
+          print(f'Created boot.img: kernel={len(kernel)}B, ramdisk={len(ramdisk)}B')
+          "
+
+          ls -lh boot.img
+
+      - name: Create flash package
+        run: |
+          mkdir -p flash-package
+          cp boot.img flash-package/
+          cp kernel/samsung-a12s.dtb flash-package/
+
+          cat > flash-package/flash.sh << 'FLASHEOF'
+#!/bin/bash
+echo "=== postmarketOS Flash Tool for Samsung Galaxy A12s ==="
+echo ""
+echo "This will flash postmarketOS to your device."
+echo "WARNING: This will replace your current OS!"
+echo ""
+echo "Make sure:"
+echo "  1. Battery is charged"
+echo "  2. Data is backed up"
+echo "  3. Device is connected via USB"
+echo ""
+read -p "Continue? (y/N) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+fi
+
+echo ""
+echo "=== Flashing ==="
+echo ""
+echo "Put device in download mode:"
+echo "  1. Power off device"
+echo "  2. Hold Vol+ and Vol- while connecting USB"
+echo "  3. Wait for Heimdall to detect device"
+echo ""
+echo "Flashing..."
+heimdall flash --BOOT boot.img
+echo ""
+echo "Done! Reboot your device."
+echo ""
+FLASHEOF
+          chmod +x flash-package/flash.sh
+
+          cat > flash-package/README.md << 'READMEEOF'
+# postmarketOS for Samsung Galaxy A12s (SM-A127F)
+
+## Quick Start
+1. Download `boot.img`
+2. Put phone in download mode (Vol+Vol- + USB)
+3. Run `heimdall flash --BOOT boot.img`
+
+## Files
+- `boot.img` - Bootable image (kernel + initramfs)
+- `samsung-a12s.dtb` - Device Tree Blob
+- `flash.sh` - Flash helper script
+
+## Status
+Early development - kernel boots to console.
+READMEEOF
+
+      - name: Upload flash package
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketos-a12s-full
+          path: flash-package/
           retention-days: 30

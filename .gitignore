@@ -22,3 +22,7 @@ Thumbs.db
 *.swp
 *.swo
 log.txt
+
+pmaports-official
+pmbootstrap
+outputs
