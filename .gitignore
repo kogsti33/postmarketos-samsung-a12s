@@ -1,0 +1,23 @@
+# Build artifacts
+*.o
+*.o.cmd
+*.ko
+*.ko.cmd
+*.mod
+*.mod.c
+*.order
+modules.order
+.tmp_*
+.cache.mk
+
+# Kernel build
+kernel-tree/
+build.log
+initramfs.cpio.gz
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo

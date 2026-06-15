@@ -1,0 +1,69 @@
+# Mainline Linux kernel for Samsung Exynos 850 devices
+# Based on Samsung kernel source for Galaxy A12s
+maintainer=""
+_flavor="postmarketos-samsung-exynos850"
+pkgname=linux-$_flavor
+pkgver=6.16.0
+pkgrel=0
+_commit="9ea268cebfcd3e12fe677c83119ee24961624421"
+pkgdesc="Mainline Kernel for Samsung Exynos 850-based devices"
+arch="aarch64"
+_carch="arm64"
+_config="config-$_flavor.$arch"
+url="https://gitlab.com/mtk-mainline/mt6763/linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps
+	pmb:cross-native
+"
+makedepends="
+	android-tools
+	bash
+	bison
+	findutils
+	flex
+	linux-headers
+	openssl-dev
+	perl
+	postmarketos-installkernel
+	xz
+"
+
+# Source
+source="
+	$url/archive/$_commit/linux-$_commit.tar.gz
+	$_config
+"
+builddir="$srcdir/linux-$_commit"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$arch" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" CC="${CC:-gcc}" \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1))-$_flavor"\
+		V=1
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" INSTALL_PATH="$pkgdir"/boot \
+		INSTALL_MOD_PATH="$pkgdir" INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir"/boot/dtbs
+	rm -f "$pkgdir"/lib/modules/*/build "$pkgdir"/lib/modules/*/source
+
+	install -D "$builddir"/include/config/kernel.release \
+		"$pkgdir"/usr/share/kernel/$_flavor/kernel.release
+
+	dtbodir="$builddir/$_outdir/arch/arm64/boot/dts/exynos"
+	mkdtboimg create "$pkgdir/boot/dtbo.img" \
+		"$dtbodir/samsung-a12s.dtb"
+}
+
+sha512sums="
+PLACEHOLDER
+"

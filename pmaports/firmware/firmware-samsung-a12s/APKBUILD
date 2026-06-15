@@ -1,0 +1,27 @@
+# Reference: <https://postmarketos.org/firmwarepkg>
+maintainer=""
+pkgname=firmware-samsung-a12s
+pkgdesc="Firmware files for Samsung Galaxy A12s (SM-A127F)"
+pkgver=1
+pkgrel=0
+url="https://postmarketos.org"
+license="MIT"
+arch="noarch"
+options="!check !archcheck"
+depends="linux-firmware-mali"
+source="README.md"
+
+package() {
+	mkdir -p "$pkgdir"/lib/firmware
+
+	# TODO: Extract firmware from stock firmware
+	# Files needed:
+	# - WiFi firmware
+	# - Bluetooth firmware
+	# - Modem firmware
+	# - GPU firmware (Mali)
+}
+
+sha512sums="
+PLACEHOLDER
+"

@@ -1,0 +1,198 @@
+name: Build postmarketOS kernel for Samsung Galaxy A12s
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            python3 \
+            device-tree-compiler \
+            cpio
+
+      - name: Clone mainline mt6763 kernel
+        run: |
+          git clone --depth=1 https://gitlab.com/mtk-mainline/mt6763/linux.git kernel-tree
+          cd kernel-tree
+          git fetch --depth=1 origin 9ea268cebfcd3e12fe677c83119ee24961624421
+
+      - name: Apply Samsung Galaxy A12s DTS
+        run: |
+          cp kernel/dts/samsung-a12s.dts kernel-tree/arch/arm64/boot/dts/exynos/
+          # Add to Makefile
+          sed -i '/exynos850-e850-96.dtb/a\\t\tsamsung-a12s.dtb' kernel-tree/arch/arm64/boot/dts/exynos/Makefile
+
+      - name: Apply defconfig
+        run: |
+          cd kernel-tree
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            KCONFIG_CONFIG=../kernel/configs/samsung-a12s_defconfig \
+            samsung-a12s_defconfig 2>/dev/null || \
+          cp ../kernel/configs/samsung-a12s_defconfig .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+      - name: Build kernel
+        run: |
+          cd kernel-tree
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            -j$(nproc) Image dtbs modules 2>&1 | tee ../build.log
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          cp kernel-tree/arch/arm64/boot/Image artifacts/Image
+          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb artifacts/samsung-a12s.dtb
+          cp kernel-tree/.config artifacts/kernel.config
+          # Package modules
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            INSTALL_MOD_PATH=../artifacts/modules INSTALL_MOD_STRIP=1 modules_install
+          # Create dtbo.img from DTB
+          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb artifacts/dtbo.img
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-a12s
+          path: artifacts/Image
+          retention-days: 30
+
+      - name: Upload DTB
+        uses: actions/upload-artifact@v4
+        with:
+          name: dtb-a12s
+          path: artifacts/samsung-a12s.dtb
+          retention-days: 30
+
+      - name: Upload modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: modules-a12s
+          path: artifacts/modules/
+          retention-days: 30
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+
+  build-postmarketos-image:
+    runs-on: ubuntu-latest
+    needs: build-kernel
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download kernel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-a12s
+          path: kernel/
+
+      - name: Download DTB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dtb-a12s
+          path: kernel/
+
+      - name: Download modules artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: modules-a12s
+          path: kernel/modules/
+
+      - name: Install postmarketOS build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-pip \
+            python3-venv \
+            git \
+           .img2simg \
+            simg2img
+          pip3 install --break-system-packages pmb
+
+      - name: Build postmarketOS image
+        run: |
+          # Create minimal rootfs structure
+          mkdir -p rootfs/{boot,lib/modules,etc,bin,sbin,usr}
+          cp kernel/Image rootfs/boot/
+          cp kernel/samsung-a12s.dtb rootfs/boot/
+          cp -r kernel/modules/lib/modules/* rootfs/lib/modules/
+          
+          # Create initramfs
+          cat > rootfs/init << 'INITEOF'
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+echo "Samsung Galaxy A12s - postmarketOS"
+exec /bin/sh
+INITEOF
+          chmod +x rootfs/init
+          
+          # Create boot image (mkbootimg compatible)
+          cd rootfs
+          find . | cpio -o -H newc | gzip > ../initramfs.cpio.gz
+          cd ..
+
+      - name: Create heimdall flash package
+        run: |
+          mkdir -p flash-package
+          cp kernel/Image flash-package/
+          cp kernel/samsung-a12s.dtb flash-package/
+          cp initramfs.cpio.gz flash-package/
+          cat > flash-package/flash.sh << 'FLASHEOF'
+#!/bin/bash
+echo "Flashing Samsung Galaxy A12s (SM-A127F) with postmarketOS"
+echo "WARNING: This will replace the current OS!"
+echo ""
+echo "Make sure your device is in download mode (Vol Up + Vol Down + USB)"
+echo ""
+read -p "Continue? (y/N) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    heimdall flash \
+        --BOOT boot.img \
+        --DTBO dtbo.img
+    echo "Done! Reboot your device."
+fi
+FLASHEOF
+          chmod +x flash-package/flash.sh
+
+      - name: Upload flash package
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketos-a12s-flash
+          path: flash-package/
+          retention-days: 30
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            flash-package/*
+          draft: true
+          generate_release_notes: true

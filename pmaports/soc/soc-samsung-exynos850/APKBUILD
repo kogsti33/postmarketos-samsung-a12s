@@ -1,0 +1,40 @@
+# Reference: <https://postmarketos.org/socpkg>
+maintainer=""
+pkgname=soc-samsung-exynos850
+pkgdesc="Common package for Samsung Exynos 850 devices"
+pkgver=1
+pkgrel=0
+url="https://postmarketos.org"
+license="BSD-3-Clause"
+arch="aarch64"
+options="!check !archcheck"
+subpackages="
+	$pkgname-firmware
+	$pkgname-x11
+"
+source="
+	xorg.conf.d/11-modesetting.conf
+	xorg.conf.d/13-panfrost-swapped-dri-nodes.conf
+"
+
+package() {
+	mkdir -p "$pkgdir"
+}
+
+firmware() {
+	install_if="$pkgname=$pkgver-r$pkgrel linux-firmware-mali"
+	mkdir -p "$subpkgdir"/lib/firmware
+}
+
+x11() {
+	install_if="$pkgname xorg-server"
+
+	install -Dm644 "$srcdir"/11-modesetting.conf \
+		-t "$subpkgdir"/usr/share/X11/xorg.conf.d
+	install -Dm644 "$srcdir"/13-panfrost-swapped-dri-nodes.conf \
+		-t "$subpkgdir"/usr/share/X11/xorg.conf.d
+}
+
+sha512sums="
+PLACEHOLDER
+"
