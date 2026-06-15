@@ -61,6 +61,18 @@ jobs:
           cp .github/scripts/init flash-package/init
           chmod +x flash-package/init
 
+      - name: Create TWRP flashable zip
+        run: |
+          mkdir -p twrp-zip/META-INF/com/google/android
+          cp .github/scripts/twrp-update-binary twrp-zip/META-INF/com/google/android/update-binary
+          cp .github/scripts/twrp-updater-script twrp-zip/META-INF/com/google/android/updater-script
+          cp boot.img twrp-zip/
+          chmod +x twrp-zip/META-INF/com/google/android/update-binary
+          cd twrp-zip
+          zip -r ../postmarketos-a12s-kernel.zip .
+          cd ..
+          ls -lh postmarketos-a12s-kernel.zip
+
       - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
@@ -80,4 +92,11 @@ jobs:
         with:
           name: postmarketos-a12s-flash
           path: flash-package/
+          retention-days: 30
+
+      - name: Upload TWRP zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketos-a12s-kernel-zip
+          path: postmarketos-a12s-kernel.zip
           retention-days: 30
