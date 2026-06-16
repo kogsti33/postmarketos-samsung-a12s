@@ -42,8 +42,8 @@ jobs:
           cp .github/scripts/twrp-update-binary twrp-zip/META-INF/com/google/android/update-binary
           cp .github/scripts/twrp-updater-script twrp-zip/META-INF/com/google/android/updater-script
           chmod +x twrp-zip/META-INF/com/google/android/update-binary
-          # Samsung Exynos uses raw Image, not boot.img
-          cp kernel-tree/arch/arm64/boot/Image twrp-zip/
+          # Samsung Exynos needs boot.img with ANDROID! header
+          cp boot.img twrp-zip/
           cd twrp-zip
           zip -r ../postmarketos-a12s-kernel.zip .
           cd ..

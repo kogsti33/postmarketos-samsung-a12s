@@ -27,13 +27,13 @@ set_progress 0.1
 mkdir -p "$TMP"
 cd "$TMP"
 
-ui_print "- Extracting kernel Image..."
-unzip -o "$3" Image -d "$TMP"
+ui_print "- Extracting boot.img..."
+unzip -o "$3" boot.img -d "$TMP"
 
 set_progress 0.4
 
-if [ ! -f Image ]; then
-  ui_print "! ERROR: Image not found in zip"
+if [ ! -f boot.img ]; then
+  ui_print "! ERROR: boot.img not found in zip"
   exit 1
 fi
 
@@ -65,8 +65,8 @@ ui_print "- Backing up original boot..."
 dd if="$BOOT_DEV" of="$SDCARD/boot-backup.img" bs=4096 2>/dev/null || true
 set_progress 0.7
 
-ui_print "- Flashing kernel Image (raw)..."
-dd if=Image of="$BOOT_DEV" bs=4096
+ui_print "- Flashing boot.img..."
+dd if=boot.img of="$BOOT_DEV" bs=4096
 set_progress 0.9
 
 ui_print "- Cleaning up..."
