@@ -36,36 +36,37 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs
 
-      - name: Create boot.img
+      - name: Create initramfs
         run: |
-          mkdir -p initramfs/bin initramfs/etc initramfs/proc initramfs/sys initramfs/dev initramfs/boot
+          mkdir -p initramfs/bin initramfs/etc initramfs/proc initramfs/sys initramfs/dev initramfs/mnt
           cp .github/scripts/init initramfs/init
           chmod +x initramfs/init
-          cp kernel-tree/arch/arm64/boot/Image initramfs/boot/
           printf '#!/bin/sh\nexec /bin/sh\n' > initramfs/bin/sh
           chmod +x initramfs/bin/sh
           cd initramfs
           find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip > ../initramfs.cpio.gz
           cd ..
-          python3 .github/scripts/mkbootimg.py kernel-tree/arch/arm64/boot/Image kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb initramfs.cpio.gz boot.img
+          ls -lh initramfs.cpio.gz
 
-      - name: Create TWRP flashable zip
+      - name: Create boot.img
         run: |
-          mkdir -p twrp-zip/META-INF/com/google/android
-          cp .github/scripts/twrp-update-binary twrp-zip/META-INF/com/google/android/update-binary
-          cp .github/scripts/twrp-updater-script twrp-zip/META-INF/com/google/android/updater-script
-          chmod +x twrp-zip/META-INF/com/google/android/update-binary
-          # Samsung Exynos needs boot.img with ANDROID! header
-          cp boot.img twrp-zip/
-          cd twrp-zip
-          zip -r ../postmarketos-a12s-kernel.zip .
-          cd ..
-          ls -lh postmarketos-a12s-kernel.zip
+          python3 .github/scripts/mkbootimg.py \
+            kernel-tree/arch/arm64/boot/Image \
+            kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb \
+            initramfs.cpio.gz \
+            boot.img
 
-      - name: Upload raw Image (for Heimdall)
+      - name: Create flash package
+        run: |
+          mkdir -p flash-package
+          cp boot.img flash-package/
+          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb flash-package/
+          cp .github/scripts/README.md flash-package/
+
+      - name: Upload kernel
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-a12s-raw
+          name: kernel-a12s
           path: kernel-tree/arch/arm64/boot/Image
           retention-days: 30
 
@@ -76,9 +77,16 @@ jobs:
           path: kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb
           retention-days: 30
 
-      - name: Upload TWRP zip
+      - name: Upload boot.img
         uses: actions/upload-artifact@v4
         with:
-          name: postmarketos-a12s-kernel-zip
-          path: postmarketos-a12s-kernel.zip
+          name: boot-a12s
+          path: boot.img
+          retention-days: 30
+
+      - name: Upload flash package
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketos-a12s-flash
+          path: flash-package/
           retention-days: 30
