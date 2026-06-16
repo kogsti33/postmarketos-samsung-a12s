@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Create Samsung Exynos 850 compatible boot.img
-Samsung requires DTB appended to kernel Image.
+Samsung requires:
+1. DTBO header (magic d7b7ab1e) appended to kernel Image
+2. ANDROID! boot.img header v2
+3. kernel_addr=0x10008000, ramdisk_addr=0x11000000
 """
 import struct
 import sys
@@ -18,35 +21,51 @@ with open(kernel_path, "rb") as f:
 with open(dtb_path, "rb") as f:
     dtb = f.read()
 
-# Append DTB to kernel Image (Samsung requirement)
-combined = bytearray(img + dtb)
+# Build DTBO block (big-endian): header(28) + entry(32) + DTB
+header_size = 28
+entry_size = 32
+dtbo_data_offset = header_size + entry_size
+
+dtbo_header = bytearray(header_size)
+struct.pack_into(">I", dtbo_header, 0, 0xd7b7ab1e)
+struct.pack_into(">I", dtbo_header, 4, dtbo_data_offset + len(dtb))
+struct.pack_into(">I", dtbo_header, 8, entry_size)
+struct.pack_into(">I", dtbo_header, 12, 1)
+struct.pack_into(">I", dtbo_header, 16, header_size)
+struct.pack_into(">I", dtbo_header, 20, 4096)
+struct.pack_into(">I", dtbo_header, 24, 0)
+
+dtbo_entry = bytearray(entry_size)
+struct.pack_into(">I", dtbo_entry, 0, dtbo_data_offset)
+struct.pack_into(">I", dtbo_entry, 4, len(dtb))
+for i in range(4):
+    struct.pack_into(">I", dtbo_entry, 16 + i*4, 0xFFFFFFFF)
+
+dtbo_block = bytes(dtbo_header) + bytes(dtbo_entry) + dtb
+combined = bytearray(img + dtbo_block)
 struct.pack_into("<Q", combined, 16, len(combined))
 
+# Read ramdisk
 ramdisk = b""
 if ramdisk_path and os.path.exists(ramdisk_path):
     with open(ramdisk_path, "rb") as f:
         ramdisk = f.read()
 
+# Build boot.img (header v2, Samsung Exynos 850)
 pagesize = 2048
-KERNEL_ADDR  = 0x10008000
-RAMDISK_ADDR = 0x11000000
-TAGS_ADDR    = 0x10000100
-CMDLINE      = b"androidboot.hardware=exynos850 androidboot.selinux=enforce loop.max_part=7 console=ttyS0,115200n8"
-
 header = bytearray(pagesize)
 header[0:8] = b"ANDROID!"
 struct.pack_into("<I", header, 8, len(combined))
-struct.pack_into("<I", header, 12, KERNEL_ADDR)
+struct.pack_into("<I", header, 12, 0x10008000)
 struct.pack_into("<I", header, 16, len(ramdisk))
-struct.pack_into("<I", header, 20, RAMDISK_ADDR)
-struct.pack_into("<I", header, 24, 0)
-struct.pack_into("<I", header, 28, 0)
-struct.pack_into("<I", header, 32, TAGS_ADDR)
+struct.pack_into("<I", header, 20, 0x11000000)
+struct.pack_into("<I", header, 32, 0x10000100)
 struct.pack_into("<I", header, 36, pagesize)
 struct.pack_into("<I", header, 40, 2)
 struct.pack_into("<I", header, 44, 0x1a00018a)
 header[48:64] = b"SRPUE06B013\x00\x00\x00\x00\x00"
-header[64:64+len(CMDLINE)] = CMDLINE
+cmdline = b"androidboot.hardware=exynos850 androidboot.selinux=enforce loop.max_part=7 console=ttyS0,115200n8"
+header[64:64+len(cmdline)] = cmdline
 
 with open(output_path, "wb") as f:
     f.write(header)
@@ -57,7 +76,7 @@ with open(output_path, "wb") as f:
         f.write(b"\x00" * ((pagesize - (len(ramdisk) % pagesize)) % pagesize))
 
 print(f"Created {output_path}:")
-print(f"  kernel+dtb: {len(combined):,} bytes ({len(combined)/1024/1024:.1f} MB)")
-print(f"  ramdisk:    {len(ramdisk):,} bytes")
-print(f"  Total:      {os.path.getsize(output_path):,} bytes ({os.path.getsize(output_path)/1024/1024:.1f} MB)")
-print(f"  DTB appended: YES (Samsung requirement)")
+print(f"  kernel+dtbo: {len(combined):,} bytes ({len(combined)/1024/1024:.1f} MB)")
+print(f"  DTBO magic:  0xd7b7ab1e (Samsung requirement)")
+print(f"  ramdisk:     {len(ramdisk):,} bytes")
+print(f"  Total:       {os.path.getsize(output_path):,} bytes ({os.path.getsize(output_path)/1024/1024:.1f} MB)")
