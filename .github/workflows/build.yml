@@ -36,6 +36,19 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs
 
+      - name: Create boot.img
+        run: |
+          mkdir -p initramfs/bin initramfs/etc initramfs/proc initramfs/sys initramfs/dev initramfs/boot
+          cp .github/scripts/init initramfs/init
+          chmod +x initramfs/init
+          cp kernel-tree/arch/arm64/boot/Image initramfs/boot/
+          printf '#!/bin/sh\nexec /bin/sh\n' > initramfs/bin/sh
+          chmod +x initramfs/bin/sh
+          cd initramfs
+          find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip > ../initramfs.cpio.gz
+          cd ..
+          python3 .github/scripts/mkbootimg.py kernel-tree/arch/arm64/boot/Image initramfs.cpio.gz boot.img
+
       - name: Create TWRP flashable zip
         run: |
           mkdir -p twrp-zip/META-INF/com/google/android
