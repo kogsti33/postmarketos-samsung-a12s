@@ -36,47 +36,23 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image dtbs
 
-      - name: Create initramfs
-        run: |
-          mkdir -p initramfs/bin initramfs/sbin initramfs/etc initramfs/proc initramfs/sys initramfs/dev initramfs/tmp initramfs/usr/bin initramfs/usr/sbin initramfs/boot
-          cp .github/scripts/init initramfs/init
-          chmod +x initramfs/init
-          cp kernel-tree/arch/arm64/boot/Image initramfs/boot/
-          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb initramfs/boot/
-          printf '#!/bin/sh\nexec /bin/sh\n' > initramfs/bin/sh
-          chmod +x initramfs/bin/sh
-          cd initramfs
-          find . -print0 | cpio --null -o -H newc 2>/dev/null | gzip > ../postmarketos.cpio.gz
-          cd ..
-          ls -lh postmarketos.cpio.gz
-
-      - name: Create boot.img
-        run: python3 .github/scripts/mkbootimg.py
-
-      - name: Create flash package
-        run: |
-          mkdir -p flash-package
-          cp boot.img flash-package/
-          cp kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb flash-package/
-          cp .github/scripts/init flash-package/init
-          chmod +x flash-package/init
-
       - name: Create TWRP flashable zip
         run: |
           mkdir -p twrp-zip/META-INF/com/google/android
           cp .github/scripts/twrp-update-binary twrp-zip/META-INF/com/google/android/update-binary
           cp .github/scripts/twrp-updater-script twrp-zip/META-INF/com/google/android/updater-script
-          cp boot.img twrp-zip/
           chmod +x twrp-zip/META-INF/com/google/android/update-binary
+          # Samsung Exynos uses raw Image, not boot.img
+          cp kernel-tree/arch/arm64/boot/Image twrp-zip/
           cd twrp-zip
           zip -r ../postmarketos-a12s-kernel.zip .
           cd ..
           ls -lh postmarketos-a12s-kernel.zip
 
-      - name: Upload kernel
+      - name: Upload raw Image (for Heimdall)
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-a12s
+          name: kernel-a12s-raw
           path: kernel-tree/arch/arm64/boot/Image
           retention-days: 30
 
@@ -85,13 +61,6 @@ jobs:
         with:
           name: dtb-a12s
           path: kernel-tree/arch/arm64/boot/dts/exynos/samsung-a12s.dtb
-          retention-days: 30
-
-      - name: Upload flash package
-        uses: actions/upload-artifact@v4
-        with:
-          name: postmarketos-a12s-flash
-          path: flash-package/
           retention-days: 30
 
       - name: Upload TWRP zip

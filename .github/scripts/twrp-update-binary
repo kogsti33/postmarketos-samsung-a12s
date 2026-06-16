@@ -1,5 +1,6 @@
 #!/sbin/sh
-# TWRP update-binary for postmarketOS kernel zip
+# TWRP update-binary for postmarketOS kernel (Samsung Exynos 850)
+# Flashes raw kernel Image to BOOT partition
 
 OUTFD=/proc/self/fd/$2
 TMP=/tmp/boot-install
@@ -11,10 +12,6 @@ ui_print() {
 
 set_progress() {
   echo "set_progress $1" > "$OUTFD"
-}
-
-is_slot_device() {
-  grep -q "boot.slot_suffix" /proc/cmdline 2>/dev/null
 }
 
 set -e
@@ -30,13 +27,13 @@ set_progress 0.1
 mkdir -p "$TMP"
 cd "$TMP"
 
-ui_print "- Extracting boot.img..."
-unzip -o "$3" boot.img -d "$TMP"
+ui_print "- Extracting kernel Image..."
+unzip -o "$3" Image -d "$TMP"
 
 set_progress 0.4
 
-if [ ! -f boot.img ]; then
-  ui_print "! ERROR: boot.img not found in zip"
+if [ ! -f Image ]; then
+  ui_print "! ERROR: Image not found in zip"
   exit 1
 fi
 
@@ -54,19 +51,22 @@ done
 
 if [ -z "$BOOT_DEV" ]; then
   ui_print "! ERROR: Could not find boot partition"
+  ui_print "! Available block devices:"
+  ls -la /dev/block/bootdevice/ 2>/dev/null
+  ls -la /dev/block/by-name/ 2>/dev/null
   exit 1
 fi
 
 ui_print "- Partition: $BOOT_DEV"
 set_progress 0.6
 
-# Backup original boot
+# Backup original
 ui_print "- Backing up original boot..."
-dd if="$BOOT_DEV" of="$TMP/boot-backup.img" bs=4096 2>/dev/null
+dd if="$BOOT_DEV" of="$SDCARD/boot-backup.img" bs=4096 2>/dev/null || true
 set_progress 0.7
 
-ui_print "- Flashing boot.img..."
-dd if=boot.img of="$BOOT_DEV" bs=4096
+ui_print "- Flashing kernel Image (raw)..."
+dd if=Image of="$BOOT_DEV" bs=4096
 set_progress 0.9
 
 ui_print "- Cleaning up..."
@@ -76,5 +76,7 @@ set_progress 1.0
 
 ui_print ""
 ui_print "============================================"
-ui_print "  Done! Reboot to apply."
+ui_print "  Done! Kernel flashed."
+ui_print "  Backup saved to /sdcard/boot-backup.img"
+ui_print "  Reboot to apply."
 ui_print "============================================"
